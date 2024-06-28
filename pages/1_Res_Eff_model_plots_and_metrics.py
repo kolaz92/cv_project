@@ -7,7 +7,7 @@ with open('history.pkl', 'rb') as file: # словарь оценок для г�
 
 st.set_page_config(layout="wide")
 
-st.write("# Метрики и графики модели классификации и классификации Efficientnet b7")
+st.write("# Метрики и графики модели классификации и локализации Efficientnet b7")
 st.write(f'Accuracy train: {log["epoch_train_accuracy"][-1]:.4f}, Accuracy valid: {log["epoch_valid_accuracy"][-1]:.4f}')
 
 # зададим функцию рисования графиков

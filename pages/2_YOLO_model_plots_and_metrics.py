@@ -6,6 +6,8 @@ import matplotlib.image as mpimg
 
 st.set_page_config(layout="wide")
 
+st.write("# Метрики и графики модели детекции YOLO")
+
 # Путь к изображениям
 image_paths = [
     'exp3/confusion_matrix.png',  # замените на свои пути к изображениям
