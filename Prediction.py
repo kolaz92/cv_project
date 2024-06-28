@@ -168,42 +168,42 @@ def reseffloc(imlist):
             pred_true_pics(image,pred_class,pred_box)
 
 def yololoc(imlist,t):
+    try:
+        @st.cache_resource
+        def get_model(conf):
+            model = torch.hub.load(
+                # будем работать с локальной моделью в текущей папке
+                repo_or_dir = './yolov5/',
+                model = 'custom', 
+                path='exp3/weights/best.pt', 
+                source='local',
+                force_reload=True
+                )
+            model.eval()
+            model.conf = conf
+            print('Model loaded')
+            return model
 
-    @st.cache_resource
-    def get_model(conf):
-        model = torch.hub.load(
-            # будем работать с локальной моделью в текущей папке
-            repo_or_dir = './yolov5/',
-            model = 'custom', 
-            path='exp3/weights/best.pt', 
-            source='local',
-            force_reload=True
-            )
-        model.eval()
-        model.conf = conf
-        print('Model loaded')
-        return model
+        with st.spinner():
+            model = get_model(t)
 
-    with st.spinner():
-        model = get_model(t)
+        results=None
+        reslist = []
+        lcol, rcol = st.columns(2)
+        with lcol:
+            st.write()
+            for img in imlist:
+                results = model(img)
+                st.image(img)
+                if results:
+                    reslist.append(results)
 
-    results=None
-    reslist = []
-    lcol, rcol = st.columns(2)
-    with lcol:
-        st.write()
-        for img in imlist:
-            results = model(img)
-            st.image(img)
-            if results:
-                reslist.append(results)
-
-    if reslist:
-        with rcol:
-            for res in reslist:
-                st.image(res.render())
-
-
+        if reslist:
+            with rcol:
+                for res in reslist:
+                    st.image(res.render())
+    except Exception as e:
+        st.write(e)
 
 with st.sidebar:
     t = st.slider('Model conf', 0., 1., .1)
