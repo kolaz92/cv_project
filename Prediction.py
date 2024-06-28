@@ -9,13 +9,16 @@ import torchutils as tu
 import json
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 import os
 import pickle as pkl
 from torchvision.models import resnet18, ResNet18_Weights, resnet50
 import streamlit as st
 from PIL import Image
 import zipfile
-import io
+import requests
+from io import BytesIO
+import shutil
 
 st.set_page_config(
     page_title='Предсказание детекции/локализации картинок',
@@ -25,6 +28,28 @@ st.sidebar.success('Выберите нужную страницу')
 
 st.write('# Предсказание детекции овощей моделью ResNet')
 st.write('# Предсказание локализации животных моделей YOLO')
+
+# Функция-обработчик для переключателя 1
+def toggle_1():
+    if st.session_state.toggle1:
+        st.session_state.toggle2 = False
+
+# Функция-обработчик для переключателя 2
+def toggle_2():
+    if st.session_state.toggle2:
+        st.session_state.toggle1 = False
+
+# Инициализация состояния переключателей, если оно еще не установлено
+if 'toggle1' not in st.session_state:
+    st.session_state.toggle1 = True
+if 'toggle2' not in st.session_state:
+    st.session_state.toggle2 = False
+if 'ByURL' not in st.session_state:
+    st.session_state['ByURL'] = False
+
+# Отображение переключателей с назначением функций-обработчиков
+st.checkbox("Resnet", key='toggle1', on_change=toggle_1)
+st.checkbox("YOLO", key='toggle2', on_change=toggle_2)
 
 class LocModel(nn.Module):
     def __init__(self):
@@ -65,74 +90,19 @@ class LocModel(nn.Module):
         #print(pred_classes.shape, pred_boxes.shape)
         return pred_classes, pred_boxes
 
-
-
-
-
-# def load_and_predict(img,IsWeather=True):
-#     pred_type = 'weather' if IsWeather else 'bird'
-
-#     # Загрузка обученной модели
-#     Pmodel = myRegNet() if IsWeather else myResNet_50()
-#     weights = f'model_weights_{pred_type}.pth' if IsWeather else f'model_weights_{pred_type}.pt'
-
-#     Pmodel.load_state_dict(torch.load(weights,map_location=torch.device('cpu'))) # модель и веса
-#     #st.write(type(torch.load(weights,map_location=torch.device('cpu'))))
-
-#     Pmodel.eval()
-
-#     with open(f'classes_{pred_type}.pkl', 'rb') as file: # словарь классов
-#         class_to_idx = pkl.load(file)
-#         class_to_idx = {value:key for key,value in class_to_idx.items()}
-
-#     #st.write(class_to_idx)
-
-#     class GrayToRGB(object):
-#         def __call__(self, img):
-#             if img.mode == 'L':
-#                 img = img.convert('RGB')
-#             return img
-        
-#     if IsWeather:
-#         valid_transforms = T.Compose([
-#             GrayToRGB(),
-#             T.Resize((224, 224)),
-#             T.ToTensor(),
-#             T.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
-#         ])
-#     else:
-#         valid_transforms = T.Compose([  
-#             T.Resize((224, 224)),
-#             T.ToTensor(),
-#             T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-#         ])
-
-#     def load_image(img): # загрузка изображения
-#         image = valid_transforms(img)        # применение трансформаций
-#         image = image.unsqueeze(0)      # добавление дополнительной размерности для батча
-#         return image
-
-#     def predict(img):
-#         img = load_image(img)
-#         with torch.no_grad():
-#             output = Pmodel(img)
-#         probabilities = torch.nn.functional.softmax(output[0], dim=0)
-#         predicted_class = probabilities.argmax().item()
-#         return predicted_class
-
-#     class_prediction = predict(img)
-#     st.write(f' ### Предсказанный класс: {class_prediction}, Название класса: {class_to_idx[class_prediction]}')
+url = st.text_input("Введите URL изображения:")
 
 # Функция для первой страницы - Загрузка файла
 def upload_img():
-    st.title("Загрузите фотографию или архив фотографий")
 
     uploaded_file = st.file_uploader("Загрузите изображение или архив (jpg или png)", type=["jpg", "jpeg", "png", "zip"])
+    imlist = []
     if uploaded_file:
         if uploaded_file.name.endswith(("jpg", "jpeg", "png")):
             # Загрузка и отображение одного изображения
             image = Image.open(uploaded_file)
-            st.image(image, caption="Загруженное изображение", use_column_width=True)
+            #st.image(image, caption="Загруженное изображение", use_column_width=True)
+            imlist.append(image)
         elif uploaded_file.name.endswith("zip"):
             # Загрузка и отображение изображений из архива
             with zipfile.ZipFile(uploaded_file, "r") as zip_ref:
@@ -144,10 +114,128 @@ def upload_img():
                     if file_name.endswith(("jpg", "jpeg", "png")):
                         image_path = f"extracted_images/{file_name}"
                         image = Image.open(image_path)
-                        st.image(image, caption=file_name, use_column_width=True)
+                        #st.image(image, caption=file_name, use_column_width=True)
+                        imlist.append(image)
+        if imlist:
+            st.session_state['ByURL'] = False
+    return imlist
 
-res = upload_img()
+def pred_true_pics(img, pred_class, pred_box):
+    l = list(pred_box[0].numpy() * 227)
+    coord = (l[0],l[1])
 
-# Загрузка обученной модели
-Pmodel = torch.load('model.pth')
-Pmodel.load_state_dict(torch.load('model_weights.pth',map_location=torch.device('cpu'))) # модель и веса
+    ix2cls = {
+        0 : 'cucumber', 
+        1 : 'eggplant', 
+        2 : 'mushroom' 
+        }
+
+    # Создайте фигуру и оси
+    fig, ax = plt.subplots(1,2)
+
+    ax = ax.flatten()
+
+    # Показать изображение
+    ax[0].imshow(img[0].permute(1,2,0))
+    ax[0].set_axis_off()
+    ax[0].set_title(f'Class {ix2cls[pred_class.argmax().item()]}')
+
+    ax[1].imshow(img[0].permute(1,2,0))
+    rect = patches.Rectangle(coord,width=l[2]-l[0],height=l[3] - l[1], linewidth=5, edgecolor='r', facecolor='none')
+    ax[1].add_patch(rect)
+    ax[1].set_axis_off()
+    # Покажите результат
+    st.pyplot(fig)
+
+def reseffloc(imlist):
+    # Загрузка обученной модели
+    Pmodel = torch.load('model.pth')
+    Pmodel.load_state_dict(torch.load('model_weights.pth',map_location=torch.device('cpu'))) # модель и веса
+    
+    Pmodel.eval()
+    valid_transforms = T.Compose(
+    [   
+        T.Resize((227, 227)),
+        T.ToTensor()
+    ]
+    )
+    with torch.no_grad():
+        for img in imlist:
+            img = img.convert("RGB")
+            image = valid_transforms(img)        # применение трансформаций
+            image = image.unsqueeze(0)      # добавление дополнительной размерности для батча
+            pred_class, pred_box = Pmodel(image)
+            pred_true_pics(image,pred_class,pred_box)
+
+def yololoc(imlist,t):
+
+    @st.cache_resource
+    def get_model(conf):
+        model = torch.hub.load(
+            # будем работать с локальной моделью в текущей папке
+            repo_or_dir = './yolov5/',
+            model = 'custom', 
+            path='exp3/weights/best.pt', 
+            source='local',
+            force_reload=True
+            )
+        model.eval()
+        model.conf = conf
+        print('Model loaded')
+        return model
+
+    with st.spinner():
+        model = get_model(t)
+
+    results=None
+    reslist = []
+    lcol, rcol = st.columns(2)
+    with lcol:
+        st.write()
+        for img in imlist:
+            results = model(img)
+            st.image(img)
+            if results:
+                reslist.append(results)
+
+    if reslist:
+        with rcol:
+            for res in reslist:
+                st.image(res.render())
+
+
+
+with st.sidebar:
+    t = st.slider('Model conf', 0., 1., .1)
+
+imlist = upload_img()
+if st.button("Скачать изображение по URL"):
+    st.session_state['ByURL'] = True
+
+if url and st.session_state['ByURL']:
+    try:
+        response = requests.get(url)
+        image = Image.open(BytesIO(response.content))
+        st.image(image, caption="Скачанное изображение", use_column_width=True)
+        imlist = []
+        imlist.append(image)
+    except requests.exceptions.RequestException as e:
+        st.error(f"Ошибка при скачивании изображения: {e}")
+else:
+    st.warning("Пожалуйста, введите URL изображения.")
+
+# st.header(st.session_state['name'])
+
+# if st.button('Jane'):
+#     st.session_state['model'] = 'Jane Doe'
+#     st.rerun()
+
+# if st.button('John'):
+#     st.session_state['model'] = 'John Doe'
+#     st.rerun()
+
+if st.button('Предсказать:'):
+    if st.session_state.toggle1:
+        reseffloc(imlist)
+    if st.session_state.toggle2:
+        yololoc(imlist,t)
